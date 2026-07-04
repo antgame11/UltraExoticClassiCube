@@ -155,6 +155,7 @@ typedef cc_uint8 cc_bool;
 #define CC_GFX_BACKEND_GL11 7
 #define CC_GFX_BACKEND_SOFTMIN 8
 #define CC_GFX_BACKEND_SOFTFP 9
+#define CC_GFX_BACKEND_WASM_EXPORT 10
 #define CC_GFX_BACKEND_IS_GL()                                                 \
   (CC_GFX_BACKEND == CC_GFX_BACKEND_GL1 ||                                     \
    CC_GFX_BACKEND == CC_GFX_BACKEND_GL2 ||                                     \
@@ -712,7 +713,11 @@ typedef cc_uint8 cc_bool;
 #undef CC_BUILD_ADVLIGHTING
 #undef CC_BUILD_FILESYSTEM
 #define CC_DISABLE_LAUNCHER
+#ifdef CC_BUILD_WASM_RENDER_EXPORT
+#define DEFAULT_GFX_BACKEND CC_GFX_BACKEND_WASM_EXPORT
+#else
 #define DEFAULT_GFX_BACKEND CC_GFX_BACKEND_SOFTFP
+#endif
 #define DEFAULT_AUD_BACKEND CC_AUD_BACKEND_NULL
 #elif defined __SYMBIAN32__
 #define CC_BUILD_SYMBIAN

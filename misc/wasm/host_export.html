@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ClassiCube Render Export Host</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+  canvas { width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const KEY_MAP = {
+	KeyA:65, KeyB:66, KeyC:67, KeyD:68, KeyE:69, KeyF:70, KeyG:71,
+	KeyH:72, KeyI:73, KeyJ:74, KeyK:75, KeyL:76, KeyM:77, KeyN:78,
+	KeyO:79, KeyP:80, KeyQ:81, KeyR:82, KeyS:83, KeyT:84, KeyU:85,
+	KeyV:86, KeyW:87, KeyX:88, KeyY:89, KeyZ:90,
+	Digit0:48, Digit1:49, Digit2:50, Digit3:51, Digit4:52,
+	Digit5:53, Digit6:54, Digit7:55, Digit8:56, Digit9:57,
+	Space:93, Enter:91, Escape:92, Backspace:94, Tab:95,
+	ShiftLeft:36, ShiftRight:37, ControlLeft:38, ControlRight:39,
+	AltLeft:40, AltRight:41, ArrowUp:44, ArrowDown:45, ArrowLeft:46, ArrowRight:47,
+	Backquote:25,
+};
+const MOUSE_MAP = { 0:119, 2:120, 1:121 };
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { alpha: false, antialias: true });
+if (!gl) {
+	alert("WebGL not supported!");
+}
+
+// --- WebGL Shader Setup ---
+const vsSource = `
+  attribute vec3 aPosition;
+  attribute vec4 aColor;
+  attribute vec2 aTexCoord;
+  uniform mat4 uMVPMatrix;
+  varying vec4 vColor;
+  varying vec2 vTexCoord;
+  void main() {
+    gl_Position = uMVPMatrix * vec4(aPosition, 1.0);
+    vColor = aColor;
+    vTexCoord = aTexCoord;
+  }
+`;
+
+const fsSource = `
+  precision mediump float;
+  varying vec4 vColor;
+  varying vec2 vTexCoord;
+  uniform sampler2D uTexture;
+  uniform bool uUseTexture;
+  uniform bool uAlphaTest;
+  void main() {
+    vec4 texCol = uUseTexture ? texture2D(uTexture, vTexCoord) : vec4(1.0);
+    vec4 finalCol = texCol * vColor;
+    if (uAlphaTest && finalCol.a < 0.5) {
+      discard;
+    }
+    gl_FragColor = finalCol;
+  }
+`;
+
+function createShader(gl, type, source) {
+	const shader = gl.createShader(type);
+	gl.shaderSource(shader, source);
+	gl.compileShader(shader);
+	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+		console.error(gl.getShaderInfoLog(shader));
+	}
+	return shader;
+}
+
+const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vs);
+gl.attachShader(program, fs);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const attribPosition = gl.getAttribLocation(program, "aPosition");
+const attribColor = gl.getAttribLocation(program, "aColor");
+const attribTexCoord = gl.getAttribLocation(program, "aTexCoord");
+const uMVPMatrix = gl.getUniformLocation(program, "uMVPMatrix");
+const uUseTexture = gl.getUniformLocation(program, "uUseTexture");
+const uAlphaTest = gl.getUniformLocation(program, "uAlphaTest");
+
+// --- Matrix utilities ---
+const projMatrix = new Float32Array(16);
+const viewMatrix = new Float32Array(16);
+const mvpMatrix = new Float32Array(16);
+const mvpTranspose = new Float32Array(16);
+
+function multiplyMatrices(out, a, b) {
+	for (let i = 0; i < 4; i++) {
+		for (let j = 0; j < 4; j++) {
+			let sum = 0.0;
+			for (let k = 0; k < 4; k++) {
+				sum += a[i * 4 + k] * b[k * 4 + j];
+			}
+			out[i * 4 + j] = sum;
+		}
+	}
+}
+
+function transposeMatrix(out, m) {
+	for (let r = 0; r < 4; r++) {
+		for (let c = 0; c < 4; c++) {
+			out[c * 4 + r] = m[r * 4 + c];
+		}
+	}
+}
+
+// --- Resource Cache ---
+const textures = new Map();
+const buffers = new Map();
+let boundVb = null;
+let boundIb = null;
+let boundTexture = null;
+let vertexFormat = 0;
+let alphaTestEnabled = false;
+
+// --- WebAssembly Instantiation ---
+fetch('/ClassiCube.wasm')
+	.then(r => r.arrayBuffer())
+	.then(bytes => {
+		let wasmMemory;
+
+		const importObject = {
+			env: {
+				// Texture Management
+				host_create_texture: (id, width, height, pixelsPtr) => {
+					const tex = gl.createTexture();
+					gl.bindTexture(gl.TEXTURE_2D, tex);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+					const data = new Uint8Array(wasmMemory.buffer, pixelsPtr, width * height * 4);
+					gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+					textures.set(id, tex);
+				},
+				host_update_texture: (id, x, y, w, h, pixelsPtr) => {
+					const tex = textures.get(id);
+					if (!tex) return;
+					gl.bindTexture(gl.TEXTURE_2D, tex);
+					const data = new Uint8Array(wasmMemory.buffer, pixelsPtr, w * h * 4);
+					gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, data);
+				},
+				host_bind_texture: (id) => {
+					const tex = textures.get(id);
+					boundTexture = tex;
+					gl.bindTexture(gl.TEXTURE_2D, tex || null);
+				},
+				host_delete_texture: (id) => {
+					const tex = textures.get(id);
+					if (tex) {
+						gl.deleteTexture(tex);
+						textures.delete(id);
+					}
+				},
+
+				// Buffer Management
+				host_create_vb: (id, format, count) => {
+					const buf = gl.createBuffer();
+					buffers.set(id, { buffer: buf, format: format, count: count });
+				},
+				host_upload_vb: (id, dataPtr, count) => {
+					const bufInfo = buffers.get(id);
+					if (!bufInfo) return;
+					gl.bindBuffer(bufInfo.format === 2 ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER, bufInfo.buffer);
+					
+					let data;
+					if (bufInfo.format === 2) {
+						// Index Buffer (cc_uint16)
+						data = new Uint16Array(wasmMemory.buffer, dataPtr, count);
+						gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
+					} else {
+						// Vertex Buffer
+						const stride = bufInfo.format === 1 ? 24 : 16; // Textured vs Coloured
+						data = new Uint8Array(wasmMemory.buffer, dataPtr, count * stride);
+						gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+					}
+				},
+				host_bind_vb: (id) => {
+					const bufInfo = buffers.get(id);
+					boundVb = bufInfo;
+					gl.bindBuffer(gl.ARRAY_BUFFER, bufInfo ? bufInfo.buffer : null);
+				},
+				host_bind_ib: (id) => {
+					const bufInfo = buffers.get(id);
+					boundIb = bufInfo;
+					gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufInfo ? bufInfo.buffer : null);
+				},
+				host_delete_vb: (id) => {
+					const bufInfo = buffers.get(id);
+					if (bufInfo) {
+						gl.deleteBuffer(bufInfo.buffer);
+						buffers.delete(id);
+					}
+				},
+				host_delete_ib: (id) => {
+					const bufInfo = buffers.get(id);
+					if (bufInfo) {
+						gl.deleteBuffer(bufInfo.buffer);
+						buffers.delete(id);
+					}
+				},
+
+				// Matrices
+				host_load_matrix: (type, matrixPtr) => {
+					const data = new Float32Array(wasmMemory.buffer, matrixPtr, 16);
+					if (type === 0) {
+						projMatrix.set(data);
+					} else {
+						viewMatrix.set(data);
+					}
+				},
+				host_enable_texture_offset: (x, y) => { },
+				host_disable_texture_offset: () => { },
+
+				// State Control
+				host_clear_color: (r, g, b, a) => {
+					gl.clearColor(r, g, b, a);
+				},
+				host_clear_buffers: (buf) => {
+					let mask = 0;
+					if (buf & 1) mask |= gl.COLOR_BUFFER_BIT;
+					if (buf & 2) mask |= gl.DEPTH_BUFFER_BIT;
+					gl.clear(mask);
+				},
+				host_set_depth_write: (enabled) => {
+					gl.depthMask(!!enabled);
+				},
+				host_set_depth_test: (enabled) => {
+					if (enabled) gl.enable(gl.DEPTH_TEST);
+					else gl.disable(gl.DEPTH_TEST);
+				},
+				host_set_alpha_blend: (enabled) => {
+					if (enabled) {
+						gl.enable(gl.BLEND);
+						gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+					} else {
+						gl.disable(gl.BLEND);
+					}
+				},
+				host_set_alpha_test: (enabled) => {
+					alphaTestEnabled = !!enabled;
+				},
+				host_set_face_culling: (enabled) => {
+					if (enabled) {
+						gl.enable(gl.CULL_FACE);
+						gl.cullFace(gl.BACK);
+					} else {
+						gl.disable(gl.CULL_FACE);
+					}
+				},
+				host_set_color_write: (r, g, b, a) => {
+					gl.colorMask(!!r, !!g, !!b, !!a);
+				},
+				host_set_viewport: (x, y, w, h) => {
+					gl.viewport(x, canvas.height - h - y, w, h);
+				},
+				host_set_scissor: (x, y, w, h) => {
+					if (w > 0 && h > 0) {
+						gl.enable(gl.SCISSOR_TEST);
+						gl.scissor(x, canvas.height - h - y, w, h);
+					} else {
+						gl.disable(gl.SCISSOR_TEST);
+					}
+				},
+				host_set_vertex_format: (fmt) => {
+					vertexFormat = fmt;
+				},
+
+				// Drawing Commands
+				host_draw_indexed_tris: (verticesCount, startVertex, hints) => {
+					if (!boundVb || !boundIb) return;
+
+					// Compute MVP matrix (M = View * Proj)
+					multiplyMatrices(mvpMatrix, viewMatrix, projMatrix);
+					transposeMatrix(mvpTranspose, mvpMatrix);
+
+					gl.uniformMatrix4fv(uMVPMatrix, false, mvpTranspose);
+					gl.uniform1i(uUseTexture, boundTexture ? 1 : 0);
+					gl.uniform1i(uAlphaTest, alphaTestEnabled ? 1 : 0);
+
+					// Setup vertex attribute pointers
+					const stride = boundVb.format === 1 ? 24 : 16;
+					gl.enableVertexAttribArray(attribPosition);
+					gl.vertexAttribPointer(attribPosition, 3, gl.FLOAT, false, stride, 0);
+
+					gl.enableVertexAttribArray(attribColor);
+					gl.vertexAttribPointer(attribColor, 4, gl.UNSIGNED_BYTE, true, stride, 12);
+
+					if (boundVb.format === 1) {
+						gl.enableVertexAttribArray(attribTexCoord);
+						gl.vertexAttribPointer(attribTexCoord, 2, gl.FLOAT, false, stride, 16);
+					} else {
+						gl.disableVertexAttribArray(attribTexCoord);
+					}
+
+					// Draw triangles using active index buffer
+					const indexOffset = ((startVertex >> 2) * 6) * 2; // offset in bytes (2 bytes per index)
+					const indicesToDraw = ((verticesCount >> 2) * 6);
+					gl.drawElements(gl.TRIANGLES, indicesToDraw, gl.UNSIGNED_SHORT, indexOffset);
+				},
+				host_draw_lines: (count) => { }
+			}
+		};
+
+		WebAssembly.instantiate(bytes, importObject).then(({ instance }) => {
+			const w = instance.exports;
+			wasmMemory = w.memory;
+
+			w._initialize();
+			const fbWidth = Math.min(window.innerWidth, 1280) | 0;
+			const fbHeight = Math.min(window.innerHeight, 720) | 0;
+			w.wasm_init(fbWidth, fbHeight);
+
+			canvas.width = fbWidth;
+			canvas.height = fbHeight;
+
+			// Handle input mapping
+			let mx = fbWidth / 2, my = fbHeight / 2;
+			canvas.addEventListener('click', () => canvas.requestPointerLock());
+			document.addEventListener('mousemove', e => {
+				if (document.pointerLockElement === canvas) {
+					mx = Math.max(0, Math.min(fbWidth - 1, mx + e.movementX));
+					my = Math.max(0, Math.min(fbHeight - 1, my + e.movementY));
+					w.wasm_mouse_move(mx, my);
+					w.wasm_mouse_delta(e.movementX, e.movementY);
+				} else {
+					const rect = canvas.getBoundingClientRect();
+					mx = (e.clientX - rect.left) * (fbWidth / rect.width);
+					my = (e.clientY - rect.top) * (fbHeight / rect.height);
+					w.wasm_mouse_move(mx | 0, my | 0);
+				}
+			});
+			document.addEventListener('mousedown', e => {
+				if (e.button in MOUSE_MAP) w.wasm_mouse_button(MOUSE_MAP[e.button], 1);
+			});
+			document.addEventListener('mouseup', e => {
+				if (e.button in MOUSE_MAP) w.wasm_mouse_button(MOUSE_MAP[e.button], 0);
+			});
+			document.addEventListener('wheel', e => w.wasm_mouse_wheel(e.deltaY < 0 ? 1 : -1));
+			document.addEventListener('keydown', e => {
+				if (e.code in KEY_MAP) { e.preventDefault(); w.wasm_key_event(KEY_MAP[e.code], 1); }
+			});
+			document.addEventListener('keyup', e => {
+				if (e.code in KEY_MAP) { e.preventDefault(); w.wasm_key_event(KEY_MAP[e.code], 0); }
+			});
+			canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+			let lastTime = performance.now();
+			function frame(now) {
+				const deltaMs = now - lastTime;
+				lastTime = now;
+
+				if (!w.wasm_tick(deltaMs)) return;
+
+				requestAnimationFrame(frame);
+			}
+			requestAnimationFrame(frame);
+		});
+	});
+</script>
+</body>
+</html>

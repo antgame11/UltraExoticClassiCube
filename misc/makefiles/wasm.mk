@@ -11,9 +11,12 @@ SOURCE_DIRS := src src/wasm
 BUILD_DIR	:= build/wasm
 
 WASM_FLAGS := --target=wasm32-wasip1 --sysroot=$(WASI_SDK)/share/wasi-sysroot -DPLAT_WASM
+ifdef WASM_EXPORT_RENDER
+WASM_FLAGS += -DCC_BUILD_WASM_RENDER_EXPORT
+endif
 
 CFLAGS	:= -g $(WASM_FLAGS) -ffunction-sections -fdata-sections
-LDFLAGS	:= -g $(WASM_FLAGS) -mexec-model=reactor -Wl,--gc-sections -Wl,-z,stack-size=1048576 -Wl,--initial-memory=16777216
+LDFLAGS	:= -g $(WASM_FLAGS) -mexec-model=reactor -Wl,--gc-sections -Wl,-z,stack-size=1048576 -Wl,--initial-memory=16777216 -Wl,--allow-undefined
 LIBS 	:=
 include misc/makefiles/common_config.mk
 
