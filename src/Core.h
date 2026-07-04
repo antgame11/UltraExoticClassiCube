@@ -584,11 +584,8 @@ typedef cc_uint8 cc_bool;
 #undef CC_BUILD_FILESYSTEM
 #undef CC_BUILD_COMPRESSION
 #define CC_DISABLE_UI
+#define CC_DISABLE_LAUNCHER
 #define CC_DISABLE_EXTRA_MODELS
-#undef CC_VAR
-#define CC_VAR __attribute__((visibility("default"), section(".ewram")))
-#undef CC_BIG_VAR
-#define CC_BIG_VAR __attribute__((section(".ewram")))
 #define DEFAULT_NET_BACKEND CC_NET_BACKEND_BUILTIN
 #define DEFAULT_AUD_BACKEND CC_AUD_BACKEND_NULL
 #define DEFAULT_GFX_BACKEND CC_GFX_BACKEND_SOFTMIN

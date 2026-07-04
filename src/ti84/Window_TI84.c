@@ -14,8 +14,8 @@
 #include <stdlib.h>
 #include "ti84defs.h"
 
-#define SCREEN_WIDTH  160
-#define SCREEN_HEIGHT 120
+#define SCREEN_WIDTH  80
+#define SCREEN_HEIGHT 60
 
 struct _DisplayData DisplayInfo;
 struct cc_window WindowInfo;
@@ -28,8 +28,8 @@ void Window_Init(void) {
     
     DisplayInfo.Width  = SCREEN_WIDTH;
     DisplayInfo.Height = SCREEN_HEIGHT;
-    DisplayInfo.ScaleX = 0.5f;
-    DisplayInfo.ScaleY = 0.5f;
+    DisplayInfo.ScaleX = 0.25f;
+    DisplayInfo.ScaleY = 0.25f;
     
     Window_Main.Width    = DisplayInfo.Width;
     Window_Main.Height   = DisplayInfo.Height;
@@ -122,21 +122,21 @@ void Window_AllocFramebuffer(struct Bitmap* bmp, int width, int height) {
 }
 
 void Window_DrawFramebuffer(Rect2D r, struct Bitmap* bmp) {
-    /* Pixel-double 160x120 backbuffer to the 320x240 calculator VRAM screen */
+    /* Pixel-quadruple 80x60 backbuffer to the 320x240 calculator VRAM screen */
     uint16_t* src = (uint16_t*)bmp->scan0;
     uint16_t* dst = (uint16_t*)gfx_vram;
     
-    for (int y = 0; y < 120; y++) {
-        uint16_t* dst_row1 = dst + (2 * y) * 320;
-        uint16_t* dst_row2 = dst + (2 * y + 1) * 320;
-        uint16_t* src_row = src + y * 160;
-        
-        for (int x = 0; x < 160; x++) {
-            uint16_t color = src_row[x];
-            dst_row1[2 * x]     = color;
-            dst_row1[2 * x + 1] = color;
-            dst_row2[2 * x]     = color;
-            dst_row2[2 * x + 1] = color;
+    for (int y = 0; y < 60; y++) {
+        uint16_t* src_row = src + y * 80;
+        for (int yy = 0; yy < 4; yy++) {
+            uint16_t* dst_row = dst + (4 * y + yy) * 320;
+            for (int x = 0; x < 80; x++) {
+                uint16_t color = src_row[x];
+                dst_row[4 * x]     = color;
+                dst_row[4 * x + 1] = color;
+                dst_row[4 * x + 2] = color;
+                dst_row[4 * x + 3] = color;
+            }
         }
     }
 }

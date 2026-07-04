@@ -1,3 +1,4 @@
+#define OVERRIDE_MEM_FUNCTIONS
 #define CC_NO_UPDATER
 #define CC_NO_DYNLIB
 #define CC_NO_SOCKETS
@@ -71,8 +72,7 @@ void Mem_Free(void* mem) {
 *#########################################################################################################################*/
 void Platform_Log(const char* msg, int len) {
     /* Write to the emulator debug console if connected */
-    dbg_write(msg, len);
-    dbg_write("\n", 1);
+    dbg_printf("%.*s\n", len, msg);
 }
 
 cc_uint64 Stopwatch_Measure(void) {
@@ -85,11 +85,11 @@ cc_uint64 Stopwatch_ElapsedMicroseconds(cc_uint64 beg, cc_uint64 end) {
 }
 
 TimeMS DateTime_CurrentUTC(void) {
-    return (TimeMS)rtc_Time(NULL) * 1000;
+    return (TimeMS)rtc_Time() * 1000;
 }
 
 void DateTime_CurrentLocal(struct cc_datetime* t) {
-    time_t rawtime = rtc_Time(NULL);
+    time_t rawtime = rtc_Time();
     struct tm* timeinfo = localtime(&rawtime);
     if (!timeinfo) {
         Mem_Set(t, 0, sizeof(*t));

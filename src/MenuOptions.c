@@ -1,3 +1,4 @@
+#ifndef CC_DISABLE_UI
 #include "Menus.h"
 #include "Widgets.h"
 #include "Game.h"
@@ -1354,4 +1355,5 @@ static void NostalgiaFunctionalityScreen_InitWidgets(struct MenuOptionsScreen* s
 void NostalgiaFunctionalityScreen_Show(void) {
 	MenuOptionsScreen_Show(NostalgiaFunctionalityScreen_InitWidgets);
 }
+#endif
 

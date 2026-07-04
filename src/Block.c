@@ -9,6 +9,7 @@
 #include "Picking.h"
 #include "Lighting.h"
 #include "Audio.h"
+#include "Platform.h"
 
 struct _BlockLists Blocks;
 
@@ -795,13 +796,23 @@ static void OnReset(void) {
 
 static void OnAtlasChanged(void* obj) { Block_RecalculateAllSpriteBB(); }
 static void OnInit(void) {
+#if defined CC_BUILD_LOWMEM || defined CC_BUILD_TINYMEM
+	Blocks.Hidden = (cc_uint8*)Mem_Alloc(BLOCK_COUNT * BLOCK_COUNT, 1, "block culling table");
+#endif
 	AutoRotate_Enabled = true;
 	Event_Register_(&TextureEvents.AtlasChanged, NULL, OnAtlasChanged);
 	OnReset();
 }
 
+static void OnFree(void) {
+#if defined CC_BUILD_LOWMEM || defined CC_BUILD_TINYMEM
+	Mem_Free(Blocks.Hidden);
+	Blocks.Hidden = NULL;
+#endif
+}
+
 struct IGameComponent Blocks_Component = {
 	OnInit,  /* Init  */
-	NULL,    /* Free  */
+	OnFree,  /* Free  */
 	OnReset, /* Reset */
 };

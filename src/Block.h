@@ -91,8 +91,11 @@ CC_VAR extern struct _BlockLists {
 	/* Whether this block is allowed to be deleted. */
 	cc_bool CanDelete[BLOCK_COUNT];
 
-	/* Bit flags of faces hidden of two neighbouring blocks. */
+#if defined CC_BUILD_LOWMEM || defined CC_BUILD_TINYMEM
+	cc_uint8* Hidden;
+#else
 	cc_uint8 Hidden[BLOCK_COUNT * BLOCK_COUNT];
+#endif
 	/* Bit flags of which faces of this block can stretch with greedy meshing. */
 	cc_uint8 CanStretch[BLOCK_COUNT];
 	/* Gravity of particles spawned when this block is broken */

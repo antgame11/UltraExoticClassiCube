@@ -226,8 +226,13 @@ CC_API cc_bool Convert_ParseFloat(const cc_string*  str, float* value);
 /* NOTE: String must case-insensitively equal "true" or "false" */
 CC_API cc_bool Convert_ParseBool(const cc_string*   str, cc_bool* value);
 
+#if defined CC_BUILD_LOWMEM || defined CC_BUILD_TINYMEM
+#define STRINGSBUFFER_BUFFER_DEF_SIZE 256
+#define STRINGSBUFFER_FLAGS_DEF_ELEMS 16
+#else
 #define STRINGSBUFFER_BUFFER_DEF_SIZE 4096
 #define STRINGSBUFFER_FLAGS_DEF_ELEMS 256
+#endif
 #define STRINGSBUFFER_DEF_LEN_SHIFT 9
 #define STRINGSBUFFER_DEF_LEN_MASK  0x1FFUL
 
