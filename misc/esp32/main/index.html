@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClassiCube Wireless Console</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0b0f19;
+            color: #f3f4f6;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            backdrop-filter: blur(10px);
+        }
+        h1 {
+            margin: 0 0 16px 0;
+            font-size: 24px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .canvas-wrap {
+            position: relative;
+            width: 400px;
+            height: 400px;
+            border: 2px solid rgba(59, 130, 246, 0.5);
+            border-radius: 12px;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
+            overflow: hidden;
+            cursor: pointer;
+        }
+        .canvas-wrap.locked {
+            cursor: none;
+            border-color: rgba(16, 185, 129, 0.6);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+        }
+        #canvas {
+            display: block;
+            width: 400px;
+            height: 400px;
+        }
+        #cursor-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 400px;
+            height: 400px;
+            pointer-events: none;
+            display: none;
+        }
+        .status {
+            margin-top: 16px;
+            font-size: 14px;
+            color: #9ca3af;
+        }
+        .status span {
+            font-weight: 600;
+        }
+        .connected {
+            color: #10b981;
+        }
+        .disconnected {
+            color: #ef4444;
+        }
+        .instructions {
+            margin-top: 16px;
+            font-size: 13px;
+            color: #6b7280;
+            text-align: center;
+            max-width: 380px;
+            line-height: 1.5;
+        }
+        kbd {
+            background-color: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            color: #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ClassiCube Wireless Console</h1>
+        <div class="canvas-wrap" id="canvas-wrap">
+            <canvas id="canvas" width="200" height="200"></canvas>
+            <canvas id="cursor-canvas" width="400" height="400"></canvas>
+        </div>
+        <div class="status">
+            Status: <span id="status" class="disconnected">Connecting...</span>
+        </div>
+        <div class="instructions">
+            Click the screen to <b>Lock Mouse Pointer</b> and play.<br>
+            Press <kbd>Esc</kbd> to unlock your mouse cursor.
+        </div>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const cursorCanvas = document.getElementById('cursor-canvas');
+        const cursorCtx = cursorCanvas.getContext('2d');
+        const canvasWrap = document.getElementById('canvas-wrap');
+        const statusSpan = document.getElementById('status');
+        const imgData = ctx.createImageData(200, 200);
+
+        // Virtual cursor state (in game coords 0-399)
+        let vcx = 200, vcy = 200;
+        let isLocked = false;
+
+        function drawVirtualCursor(x, y) {
+            cursorCtx.clearRect(0, 0, 400, 400);
+            cursorCtx.save();
+            cursorCtx.translate(x, y);
+            // Classic arrow pointer
+            const arrow = new Path2D('M 0 0 L 0 18 L 5 13 L 8 20 L 11 19 L 8 12 L 14 12 Z');
+            cursorCtx.strokeStyle = '#000';
+            cursorCtx.lineWidth = 1.5;
+            cursorCtx.lineJoin = 'round';
+            cursorCtx.stroke(arrow);
+            cursorCtx.fillStyle = '#fff';
+            cursorCtx.fill(arrow);
+            cursorCtx.restore();
+        }
+
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = document.pointerLockElement === canvas;
+            if (isLocked) {
+                vcx = 200; vcy = 200;
+                cursorCanvas.style.display = 'block';
+                drawVirtualCursor(vcx, vcy);
+                canvasWrap.classList.add('locked');
+            } else {
+                cursorCanvas.style.display = 'none';
+                canvasWrap.classList.remove('locked');
+            }
+        });
+        
+        // Open WebSocket connection to ESP32
+        const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProto}//${window.location.host}/ws`;
+        const socket = new WebSocket(wsUrl);
+        socket.binaryType = 'arraybuffer';
+        
+        socket.onopen = () => {
+            statusSpan.textContent = 'Connected';
+            statusSpan.className = 'connected';
+        };
+        
+        socket.onclose = () => {
+            statusSpan.textContent = 'Disconnected';
+            statusSpan.className = 'disconnected';
+        };
+        
+        // Render video frame
+        socket.onmessage = async (event) => {
+            if (!(event.data instanceof ArrayBuffer)) return;
+            const view = new DataView(event.data);
+            
+            let offset = 0;
+            for (let i = 0; i < 200 * 200; i++) {
+                const val = view.getUint16(i * 2, false);
+                const r = ((val >> 11) & 0x1F) * 255 / 31;
+                const g = ((val >> 5) & 0x3F) * 255 / 63;
+                const b = (val & 0x1F) * 255 / 31;
+                
+                imgData.data[offset]     = r;
+                imgData.data[offset + 1] = g;
+                imgData.data[offset + 2] = b;
+                imgData.data[offset + 3] = 255;
+                offset += 4;
+            }
+            ctx.putImageData(imgData, 0, 0);
+        };
+        
+        // JS Key mapping to ClassiCube keycodes (matching Input.h)
+        const KEY_MAP = {
+            'KeyA': 65, 'KeyB': 66, 'KeyC': 67, 'KeyD': 68, 'KeyE': 69, 'KeyF': 70, 'KeyG': 71,
+            'KeyH': 72, 'KeyI': 73, 'KeyJ': 74, 'KeyK': 75, 'KeyL': 76, 'KeyM': 77, 'KeyN': 78,
+            'KeyO': 79, 'KeyP': 80, 'KeyQ': 81, 'KeyR': 82, 'KeyS': 83, 'KeyT': 84, 'KeyU': 85,
+            'KeyV': 86, 'KeyW': 87, 'KeyX': 88, 'KeyY': 89, 'KeyZ': 90,
+            'Digit0': 48, 'Digit1': 49, 'Digit2': 50, 'Digit3': 51, 'Digit4': 52,
+            'Digit5': 53, 'Digit6': 54, 'Digit7': 55, 'Digit8': 56, 'Digit9': 57,
+            'Space': 93, 'Enter': 91, 'Escape': 92, 'Backspace': 94, 'Tab': 95,
+            'ShiftLeft': 36, 'ShiftRight': 37, 'ControlLeft': 38, 'ControlRight': 39,
+            'AltLeft': 40, 'AltRight': 41, 'ArrowUp': 44, 'ArrowDown': 45,
+            'ArrowLeft': 46, 'ArrowRight': 47
+        };
+        
+        function sendEvent(type, key, x = 0, y = 0) {
+            if (socket.readyState !== WebSocket.OPEN) return;
+            const buffer = new ArrayBuffer(6);
+            const view = new DataView(buffer);
+            view.setUint8(0, type);
+            view.setUint8(1, key);
+            view.setUint16(2, x, false);
+            view.setUint16(4, y, false);
+            socket.send(buffer);
+        }
+        
+        // Pointer Lock & Focus events
+        canvas.addEventListener('click', () => {
+            if (!isLocked) canvas.requestPointerLock();
+        });
+
+        // Mouse Move events
+        document.addEventListener('mousemove', (e) => {
+            if (isLocked) {
+                vcx = Math.max(0, Math.min(399, vcx + e.movementX));
+                vcy = Math.max(0, Math.min(399, vcy + e.movementY));
+                sendEvent(2, 0, vcx, vcy);
+                drawVirtualCursor(vcx, vcy);
+            } else {
+                const rect = canvas.getBoundingClientRect();
+                const x = Math.max(0, Math.min(399, ((e.clientX - rect.left) / rect.width) * 400));
+                const y = Math.max(0, Math.min(399, ((e.clientY - rect.top) / rect.height) * 400));
+                sendEvent(2, 0, x, y);
+            }
+        });
+        
+        // Mouse Click events
+        document.addEventListener('mousedown', (e) => {
+            if (document.pointerLockElement !== canvas) return;
+            let ccBtn = 0;
+            if (e.button === 0) ccBtn = 119; // Left Click
+            if (e.button === 2) ccBtn = 120; // Right Click
+            if (e.button === 1) ccBtn = 121; // Middle Click
+            if (ccBtn) sendEvent(3, ccBtn);
+        });
+        
+        document.addEventListener('mouseup', (e) => {
+            if (document.pointerLockElement !== canvas) return;
+            let ccBtn = 0;
+            if (e.button === 0) ccBtn = 119;
+            if (e.button === 2) ccBtn = 120;
+            if (e.button === 1) ccBtn = 121;
+            if (ccBtn) sendEvent(4, ccBtn);
+        });
+        
+        // Keyboard events
+        document.addEventListener('keydown', (e) => {
+            if (document.pointerLockElement !== canvas && e.code !== 'Escape') return;
+            if (e.code in KEY_MAP) {
+                e.preventDefault();
+                sendEvent(0, KEY_MAP[e.code]);
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (document.pointerLockElement !== canvas && e.code !== 'Escape') return;
+            if (e.code in KEY_MAP) {
+                e.preventDefault();
+                sendEvent(1, KEY_MAP[e.code]);
+            }
+        });
+        
+        // Disable context menu on canvas
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+    </script>
+</body>
+</html>

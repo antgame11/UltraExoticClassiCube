@@ -64,11 +64,17 @@ ios:
 android:
 	$(MAKE) -f misc/android/Makefile $(filter-out $@, $(MAKECMDGOALS))
 
+# WebAssembly
+wasm:
+	$(MAKE) -f misc/makefiles/wasm.mk  $(filter-out $@, $(MAKECMDGOALS))
+
 # Embedded systems
 wince:
 	$(MAKE) -f misc/makefiles/wince.mk $(filter-out $@, $(MAKECMDGOALS))
 rpi:
 	$(MAKE) -f misc/makefiles/rpi.mk $(filter-out $@, $(MAKECMDGOALS))
+esp32:
+	idf.py -C misc/esp32 build $(filter-out $@, $(MAKECMDGOALS))
 
 # SEGA consoles
 32x:

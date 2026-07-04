@@ -8,7 +8,7 @@ CC_BEGIN_HEADER
 
 struct Stream;
 
-#if defined CC_BUILD_WEB || defined CC_BUILD_ANDROID || defined CC_BUILD_PSP || defined CC_BUILD_PSVITA || defined CC_BUILD_PS2 || defined CC_BUILD_PS4
+#if defined CC_BUILD_WEB || defined CC_BUILD_WASM || defined CC_BUILD_ANDROID || defined CC_BUILD_PSP || defined CC_BUILD_PSVITA || defined CC_BUILD_PS2 || defined CC_BUILD_PS4
 	#define BITMAPCOLOR_R_SHIFT  0
 	#define BITMAPCOLOR_G_SHIFT  8
 	#define BITMAPCOLOR_B_SHIFT 16
@@ -23,7 +23,7 @@ struct Stream;
 	#define BITMAPCOLOR_G_SHIFT  5
 	#define BITMAPCOLOR_R_SHIFT 10
 	#define BITMAPCOLOR_A_SHIFT 15
-#elif defined CC_BUILD_PS1 || defined CC_BUILD_SATURN || defined CC_BUILD_NDS || defined CC_BUILD_32X || defined CC_BUILD_GBA || defined CC_BUILD_ATARIOS
+#elif defined CC_BUILD_PS1 || defined CC_BUILD_SATURN || defined CC_BUILD_NDS || defined CC_BUILD_32X || defined CC_BUILD_GBA || defined CC_BUILD_ATARIOS || defined CC_BUILD_TI84
 	#define BITMAPCOLOR_R_SHIFT  0
 	#define BITMAPCOLOR_G_SHIFT  5
 	#define BITMAPCOLOR_B_SHIFT 10

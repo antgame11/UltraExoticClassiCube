@@ -1,3 +1,11 @@
+# UltraExoticClassiCube
+
+# unique ports completed:
+* esp32 (works)
+* agnostic wasm (works)
+* technically luau (use spider to build wasm to luau) (works, poorly)
+* ti84 plus ce (wip)
+
 ClassiCube is a custom Minecraft Classic compatible client written in C from scratch.<br>
 
 You can **download ClassiCube** [here](https://www.classicube.net/download/) and the very latest builds [here](https://www.classicube.net/nightlies/).

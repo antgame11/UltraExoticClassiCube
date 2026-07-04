@@ -69,6 +69,7 @@ typedef struct CCTexture {
 static CCTexture* curTexture;
 static BitmapCol* curTexPixels;
 static int curTexWidth, curTexHeight;
+static int curTexWidthShift;
 static int texWidthMask, texHeightMask;
 static int texSinglePixel;
 		
@@ -80,6 +81,8 @@ void Gfx_BindTexture(GfxResourceID texId) {
 	curTexPixels = tex->pixels;
 	curTexWidth  = tex->width;
 	curTexHeight = tex->height;
+
+	curTexWidthShift = Math_ilog2(tex->width);
 
 	texWidthMask   = (1 << Math_ilog2(tex->width))  - 1;
 	texHeightMask  = (1 << Math_ilog2(tex->height)) - 1;
@@ -394,147 +397,248 @@ static void DrawSprite2D(Vertex* V0, Vertex* V1, Vertex* V2) {
 	minY = max(minY, 0); maxY = min(maxY, fb_maxY);
 
 	int x, y;
-	for (y = minY; y <= maxY; y++) 
-	{
-		int texY = fast ? (begTY + (y - minY)) : (((begTY + delTY * (y - minY) / height)) & texHeightMask);
-		for (x = minX; x <= maxX; x++) 
-		{
-			int texX = fast ? (begTX + (x - minX)) : (((begTX + delTX * (x - minX) / width)) & texWidthMask);
-			int texIndex = texY * curTexWidth + texX;
+	if (fast) {
+		if (!gfx_alphaBlend) {
+			if (vColor == PACKEDCOL_WHITE) {
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = begTY + (y - minY);
+					int texIndex = (texY << curTexWidthShift) + begTX;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
 
-			BitmapCol color = curTexPixels[texIndex];
-			int R, G, B, A;
+					Mem_Copy(&colorBuffer[cb_index], &curTexPixels[texIndex], (maxX - minX + 1) * sizeof(BitmapCol));
+				}
+			} else {
+				int r1 = PackedCol_R(vColor);
+				int g1 = PackedCol_G(vColor);
+				int b1 = PackedCol_B(vColor);
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = begTY + (y - minY);
+					int texIndex = (texY << curTexWidthShift) + begTX;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
 
-			A = BitmapCol_A(color);
-			if (gfx_alphaBlend && A == 0) continue;
-			int cb_index = y * cb_stride + x;
-
-			if (gfx_alphaBlend && A != 255) {
-				BitmapCol dst = colorBuffer[cb_index];
-				int dstR = BitmapCol_R(dst);
-				int dstG = BitmapCol_G(dst);
-				int dstB = BitmapCol_B(dst);
-
-				R = BitmapCol_R(color);
-				G = BitmapCol_G(color);
-				B = BitmapCol_B(color);
-
-				R = (R * A + dstR * (255 - A)) >> 8;
-				G = (G * A + dstG * (255 - A)) >> 8;
-				B = (B * A + dstB * (255 - A)) >> 8;
-				color = BitmapCol_Make(R, G, B, 0xFF);
+					for (x = minX; x <= maxX; x++, texIndex++, cb_index++) 
+					{
+						BitmapCol color = curTexPixels[texIndex];
+						int r2 = BitmapCol_R(color);
+						int g2 = BitmapCol_G(color);
+						int b2 = BitmapCol_B(color);
+						int R = ( r1 * r2 ) >> 8;
+						int G = ( g1 * g2 ) >> 8;
+						int B = ( b1 * b2 ) >> 8;
+						colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
+					}
+				}
 			}
+		} else { // gfx_alphaBlend is true
+			if (vColor == PACKEDCOL_WHITE) {
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = begTY + (y - minY);
+					int texIndex = (texY << curTexWidthShift) + begTX;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
 
-			if (vColor != PACKEDCOL_WHITE) {
-				int r1 = PackedCol_R(vColor), r2 = BitmapCol_R(color);
-				R = ( r1 * r2 ) >> 8;
-				int g1 = PackedCol_G(vColor), g2 = BitmapCol_G(color);
-				G = ( g1 * g2 ) >> 8;
-				int b1 = PackedCol_B(vColor), b2 = BitmapCol_B(color);
-				B = ( b1 * b2 ) >> 8;
+					for (x = minX; x <= maxX; x++, texIndex++, cb_index++) 
+					{
+						BitmapCol color = curTexPixels[texIndex];
+						int A = BitmapCol_A(color);
+						if (A == 0) continue;
 
-				color = BitmapCol_Make(R, G, B, 0xFF);
+						if (A != 255) {
+							BitmapCol dst = colorBuffer[cb_index];
+							int dstR = BitmapCol_R(dst);
+							int dstG = BitmapCol_G(dst);
+							int dstB = BitmapCol_B(dst);
+
+							int R = BitmapCol_R(color);
+							int G = BitmapCol_G(color);
+							int B = BitmapCol_B(color);
+
+							R = (R * A + dstR * (255 - A)) >> 8;
+							G = (G * A + dstG * (255 - A)) >> 8;
+							B = (B * A + dstB * (255 - A)) >> 8;
+							color = BitmapCol_Make(R, G, B, 0xFF);
+						}
+
+						colorBuffer[cb_index] = color;
+					}
+				}
+			} else {
+				int r1 = PackedCol_R(vColor);
+				int g1 = PackedCol_G(vColor);
+				int b1 = PackedCol_B(vColor);
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = begTY + (y - minY);
+					int texIndex = (texY << curTexWidthShift) + begTX;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
+
+					for (x = minX; x <= maxX; x++, texIndex++, cb_index++) 
+					{
+						BitmapCol color = curTexPixels[texIndex];
+						int A = BitmapCol_A(color);
+						if (A == 0) continue;
+
+						int R = BitmapCol_R(color);
+						int G = BitmapCol_G(color);
+						int B = BitmapCol_B(color);
+
+						if (A != 255) {
+							BitmapCol dst = colorBuffer[cb_index];
+							int dstR = BitmapCol_R(dst);
+							int dstG = BitmapCol_G(dst);
+							int dstB = BitmapCol_B(dst);
+
+							R = (R * A + dstR * (255 - A)) >> 8;
+							G = (G * A + dstG * (255 - A)) >> 8;
+							B = (B * A + dstB * (255 - A)) >> 8;
+						}
+
+						R = ( r1 * R ) >> 8;
+						G = ( g1 * G ) >> 8;
+						B = ( b1 * B ) >> 8;
+
+						colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
+					}
+				}
 			}
+		}
+	} else {
+		int stepX = (delTX << 16) / width;
+		if (!gfx_alphaBlend) {
+			if (vColor == PACKEDCOL_WHITE) {
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = ((begTY + delTY * (y - minY) / height)) & texHeightMask;
+					int texY_stride = texY << curTexWidthShift;
+					int curX = begTX << 16;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
 
-			colorBuffer[cb_index] = color;
+					for (x = minX; x <= maxX; x++, curX += stepX, cb_index++) 
+					{
+						int texX = (curX >> 16) & texWidthMask;
+						int texIndex = texY_stride + texX;
+						colorBuffer[cb_index] = curTexPixels[texIndex];
+					}
+				}
+			} else {
+				int r1 = PackedCol_R(vColor);
+				int g1 = PackedCol_G(vColor);
+				int b1 = PackedCol_B(vColor);
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = ((begTY + delTY * (y - minY) / height)) & texHeightMask;
+					int texY_stride = texY << curTexWidthShift;
+					int curX = begTX << 16;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
+
+					for (x = minX; x <= maxX; x++, curX += stepX, cb_index++) 
+					{
+						int texX = (curX >> 16) & texWidthMask;
+						int texIndex = texY_stride + texX;
+						BitmapCol color = curTexPixels[texIndex];
+						int r2 = BitmapCol_R(color);
+						int g2 = BitmapCol_G(color);
+						int b2 = BitmapCol_B(color);
+						int R = ( r1 * r2 ) >> 8;
+						int G = ( g1 * g2 ) >> 8;
+						int B = ( b1 * b2 ) >> 8;
+						colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
+					}
+				}
+			}
+		} else { // gfx_alphaBlend is true
+			if (vColor == PACKEDCOL_WHITE) {
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = ((begTY + delTY * (y - minY) / height)) & texHeightMask;
+					int texY_stride = texY << curTexWidthShift;
+					int curX = begTX << 16;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
+
+					for (x = minX; x <= maxX; x++, curX += stepX, cb_index++) 
+					{
+						int texX = (curX >> 16) & texWidthMask;
+						int texIndex = texY_stride + texX;
+						BitmapCol color = curTexPixels[texIndex];
+						int A = BitmapCol_A(color);
+						if (A == 0) continue;
+
+						if (A != 255) {
+							BitmapCol dst = colorBuffer[cb_index];
+							int dstR = BitmapCol_R(dst);
+							int dstG = BitmapCol_G(dst);
+							int dstB = BitmapCol_B(dst);
+
+							int R = BitmapCol_R(color);
+							int G = BitmapCol_G(color);
+							int B = BitmapCol_B(color);
+
+							R = (R * A + dstR * (255 - A)) >> 8;
+							G = (G * A + dstG * (255 - A)) >> 8;
+							B = (B * A + dstB * (255 - A)) >> 8;
+							color = BitmapCol_Make(R, G, B, 0xFF);
+						}
+
+						colorBuffer[cb_index] = color;
+					}
+				}
+			} else {
+				int r1 = PackedCol_R(vColor);
+				int g1 = PackedCol_G(vColor);
+				int b1 = PackedCol_B(vColor);
+				for (y = minY; y <= maxY; y++) 
+				{
+					int texY = ((begTY + delTY * (y - minY) / height)) & texHeightMask;
+					int texY_stride = texY << curTexWidthShift;
+					int curX = begTX << 16;
+					int cb_row_start = y * cb_stride;
+					int cb_index = cb_row_start + minX;
+
+					for (x = minX; x <= maxX; x++, curX += stepX, cb_index++) 
+					{
+						int texX = (curX >> 16) & texWidthMask;
+						int texIndex = texY_stride + texX;
+						BitmapCol color = curTexPixels[texIndex];
+						int A = BitmapCol_A(color);
+						if (A == 0) continue;
+
+						int R = BitmapCol_R(color);
+						int G = BitmapCol_G(color);
+						int B = BitmapCol_B(color);
+
+						if (A != 255) {
+							BitmapCol dst = colorBuffer[cb_index];
+							int dstR = BitmapCol_R(dst);
+							int dstG = BitmapCol_G(dst);
+							int dstB = BitmapCol_B(dst);
+
+							R = (R * A + dstR * (255 - A)) >> 8;
+							G = (G * A + dstG * (255 - A)) >> 8;
+							B = (B * A + dstB * (255 - A)) >> 8;
+						}
+
+						R = ( r1 * R ) >> 8;
+						G = ( g1 * G ) >> 8;
+						B = ( b1 * B ) >> 8;
+
+						colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
+					}
+				}
+			}
 		}
 	}
 }
 
 #define edgeFunction(ax,ay, bx,by, cx,cy) (((bx) - (ax)) * ((cy) - (ay)) - ((by) - (ay)) * ((cx) - (ax)))
-
-static void DrawTriangle2D(Vertex* V0, Vertex* V1, Vertex* V2) {
-	int x0 = (int)V0->x, y0 = (int)V0->y;
-	int x1 = (int)V1->x, y1 = (int)V1->y;
-	int x2 = (int)V2->x, y2 = (int)V2->y;
-	int minX = min(x0, min(x1, x2));
-	int minY = min(y0, min(y1, y2));
-	int maxX = max(x0, max(x1, x2));
-	int maxY = max(y0, max(y1, y2));
-
-	// Reject triangles completely outside
-	if (maxX < 0 || minX > fb_maxX) return;
-	if (maxY < 0 || minY > fb_maxY) return;
-
-	// Perform scissoring
-	minX = max(minX, 0); maxX = min(maxX, fb_maxX);
-	minY = max(minY, 0); maxY = min(maxY, fb_maxY);
-
-	float u0 = V0->u * curTexWidth,  u1 = V1->u * curTexWidth,  u2 = V2->u * curTexWidth;
-	float v0 = V0->v * curTexHeight, v1 = V1->v * curTexHeight, v2 = V2->v * curTexHeight;
-	PackedCol color = V0->c;
-
-	int area = edgeFunction(x0,y0, x1,y1, x2,y2);
-	float factor = 1.0f / area;
-	int x, y;
-	
-	// https://fgiesen.wordpress.com/2013/02/10/optimizing-the-basic-rasterizer/
-	// Essentially these are the deltas of edge functions between X/Y and X/Y + 1 (i.e. one X/Y step)
-	int dx01  = y0 - y1, dy01 = x1 - x0;
-	int dx12  = y1 - y2, dy12 = x2 - x1;
-	int dx20  = y2 - y0, dy20 = x0 - x2;
-
-	float bc0_start = edgeFunction(x1,y1, x2,y2, minX+0.5f,minY+0.5f);
-	float bc1_start = edgeFunction(x2,y2, x0,y0, minX+0.5f,minY+0.5f);
-	float bc2_start = edgeFunction(x0,y0, x1,y1, minX+0.5f,minY+0.5f);
-
-	for (y = minY; y <= maxY; y++, bc0_start += dy12, bc1_start += dy20, bc2_start += dy01) 
-	{
-		float bc0 = bc0_start;
-		float bc1 = bc1_start;
-		float bc2 = bc2_start;
-
-		for (x = minX; x <= maxX; x++, bc0 += dx12, bc1 += dx20, bc2 += dx01) 
-		{
-			float ic0 = bc0 * factor;
-			float ic1 = bc1 * factor;
-			float ic2 = bc2 * factor;
-
-			if (ic0 < 0 || ic1 < 0 || ic2 < 0) continue;
-			int cb_index = y * cb_stride + x;
-
-			int R, G, B, A;
-			if (gfx_format == VERTEX_FORMAT_TEXTURED) {
-				float u = ic0 * u0 + ic1 * u1 + ic2 * u2;
-				float v = ic0 * v0 + ic1 * v1 + ic2 * v2;
-				int texX = ((int)u) & texWidthMask;
-				int texY = ((int)v) & texHeightMask;
-				int texIndex = texY * curTexWidth + texX;
-
-				BitmapCol tColor = curTexPixels[texIndex];
-				int a1 = PackedCol_A(color), a2 = BitmapCol_A(tColor);
-				A = ( a1 * a2 ) >> 8;
-				int r1 = PackedCol_R(color), r2 = BitmapCol_R(tColor);
-				R = ( r1 * r2 ) >> 8;
-				int g1 = PackedCol_G(color), g2 = BitmapCol_G(tColor);
-				G = ( g1 * g2 ) >> 8;
-				int b1 = PackedCol_B(color), b2 = BitmapCol_B(tColor);
-				B = ( b1 * b2 ) >> 8;
-			} else {
-				R = PackedCol_R(color);
-				G = PackedCol_G(color);
-				B = PackedCol_B(color);
-				A = PackedCol_A(color);
-			}
-
-			if (gfx_alphaTest && A < 0x80) continue;
-			if (gfx_alphaBlend && A == 0)  continue;
-
-			if (gfx_alphaBlend && A != 255) {
-				BitmapCol dst = colorBuffer[cb_index];
-				int dstR = BitmapCol_R(dst);
-				int dstG = BitmapCol_G(dst);
-				int dstB = BitmapCol_B(dst);
-
-				R = (R * A + dstR * (255 - A)) >> 8;
-				G = (G * A + dstG * (255 - A)) >> 8;
-				B = (B * A + dstB * (255 - A)) >> 8;
-			}
-
-			colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
-		}
-	}
-}
 
 #define MultiplyColors(vColor, tColor) \
 	a1 = PackedCol_A(vColor); \
@@ -553,20 +657,34 @@ static void DrawTriangle2D(Vertex* V0, Vertex* V1, Vertex* V2) {
 	b2 = BitmapCol_B(tColor); \
 	B  = ( b1 * b2 ) >> 8;    \
 
-static void DrawTriangle3D(Vertex* V0, Vertex* V1, Vertex* V2) {
+static void DrawTriangle2D(Vertex* V0, Vertex* V1, Vertex* V2) {
 	int x0 = (int)V0->x, y0 = (int)V0->y;
 	int x1 = (int)V1->x, y1 = (int)V1->y;
 	int x2 = (int)V2->x, y2 = (int)V2->y;
+
+	float u0 = V0->u * curTexWidth,  u1 = V1->u * curTexWidth,  u2 = V2->u * curTexWidth;
+	float v0 = V0->v * curTexHeight, v1 = V1->v * curTexHeight, v2 = V2->v * curTexHeight;
+
+	int area = edgeFunction(x0,y0, x1,y1, x2,y2);
+	if (area == 0) return;
+
+	if (area < 0) {
+		int temp;
+		float tempF;
+
+		temp = x1; x1 = x2; x2 = temp;
+		temp = y1; y1 = y2; y2 = temp;
+
+		tempF = u1; u1 = u2; u2 = tempF;
+		tempF = v1; v1 = v2; v2 = tempF;
+
+		area = -area;
+	}
+
 	int minX = min(x0, min(x1, x2));
 	int minY = min(y0, min(y1, y2));
 	int maxX = max(x0, max(x1, x2));
 	int maxY = max(y0, max(y1, y2));
-
-	int area = edgeFunction(x0,y0, x1,y1, x2,y2);
-	if (faceCulling) {
-		// https://gamedev.stackexchange.com/questions/203694/how-to-make-backface-culling-work-correctly-in-both-orthographic-and-perspective
-		if (area < 0) return;
-	}
 
 	// Reject triangles completely outside
 	if (maxX < 0 || minX > fb_maxX) return;
@@ -576,20 +694,9 @@ static void DrawTriangle3D(Vertex* V0, Vertex* V1, Vertex* V2) {
 	minX = max(minX, 0); maxX = min(maxX, fb_maxX);
 	minY = max(minY, 0); maxY = min(maxY, fb_maxY);
 
-	// NOTE: W in frag variables below is actually 1/W 
-	float factor = 1.0f / area;
-	float w0 = V0->w, w1 = V1->w, w2 = V2->w;
-	
-	// TODO proper clipping
-	if (w0 <= 0 || w1 <= 0 || w2 <= 0) {
-		return;
-	}
-
-	float z0 = V0->z, z1 = V1->z, z2 = V2->z;
 	PackedCol color = V0->c;
-
-	float u0 = V0->u * curTexWidth,  u1 = V1->u * curTexWidth,  u2 = V2->u * curTexWidth;
-	float v0 = V0->v * curTexHeight, v1 = V1->v * curTexHeight, v2 = V2->v * curTexHeight;
+	float factor = 1.0f / area;
+	int x, y;
 	
 	// https://fgiesen.wordpress.com/2013/02/10/optimizing-the-basic-rasterizer/
 	// Essentially these are the deltas of edge functions between X/Y and X/Y + 1 (i.e. one X/Y step)
@@ -601,7 +708,135 @@ static void DrawTriangle3D(Vertex* V0, Vertex* V1, Vertex* V2) {
 	float bc1_start = edgeFunction(x2,y2, x0,y0, minX+0.5f,minY+0.5f);
 	float bc2_start = edgeFunction(x0,y0, x1,y1, minX+0.5f,minY+0.5f);
 
-	int R, G, B, A, x, y;
+	cc_bool texturing = gfx_format == VERTEX_FORMAT_TEXTURED;
+	float du_dx = 0.0f, dv_dx = 0.0f;
+	float u0_f = 0.0f, u1_f = 0.0f, u2_f = 0.0f;
+	float v0_f = 0.0f, v1_f = 0.0f, v2_f = 0.0f;
+
+	int R, G, B, A;
+	int a1, r1, g1, b1;
+	int a2, r2, g2, b2;
+
+	if (!texturing) {
+		R = PackedCol_R(color);
+		G = PackedCol_G(color);
+		B = PackedCol_B(color);
+		A = PackedCol_A(color);
+	} else {
+		u0_f = u0 * factor; u1_f = u1 * factor; u2_f = u2 * factor;
+		v0_f = v0 * factor; v1_f = v1 * factor; v2_f = v2 * factor;
+		du_dx = dx12 * u0_f + dx20 * u1_f + dx01 * u2_f;
+		dv_dx = dx12 * v0_f + dx20 * v1_f + dx01 * v2_f;
+	}
+
+	if (texturing) {
+		for (y = minY; y <= maxY; y++, bc0_start += dy12, bc1_start += dy20, bc2_start += dy01) 
+		{
+			float bc0 = bc0_start;
+			float bc1 = bc1_start;
+			float bc2 = bc2_start;
+
+			float interp_U = bc0 * u0_f + bc1 * u1_f + bc2 * u2_f;
+			float interp_V = bc0 * v0_f + bc1 * v1_f + bc2 * v2_f;
+
+			int cb_row_start = y * cb_stride;
+
+			for (x = minX; x <= maxX; x++) 
+			{
+				if (bc0 < 0 || bc1 < 0 || bc2 < 0) goto next_pixel_tex;
+
+				int texX = ((int)interp_U) & texWidthMask;
+				int texY = ((int)interp_V) & texHeightMask;
+				int texIndex = (texY << curTexWidthShift) + texX;
+
+				BitmapCol tColor = curTexPixels[texIndex];
+				MultiplyColors(color, tColor);
+
+				if (gfx_alphaTest && A < 0x80) goto next_pixel_tex;
+				if (gfx_alphaBlend && A == 0)  goto next_pixel_tex;
+
+				int cb_index = cb_row_start + x;
+				int finR = R, finG = G, finB = B;
+
+				if (gfx_alphaBlend && A != 255) {
+					BitmapCol dst = colorBuffer[cb_index];
+					int dstR = BitmapCol_R(dst);
+					int dstG = BitmapCol_G(dst);
+					int dstB = BitmapCol_B(dst);
+
+					finR = (R * A + dstR * (255 - A)) >> 8;
+					finG = (G * A + dstG * (255 - A)) >> 8;
+					finB = (B * A + dstB * (255 - A)) >> 8;
+				}
+
+				colorBuffer[cb_index] = BitmapCol_Make(finR, finG, finB, 0xFF);
+
+			next_pixel_tex:
+				bc0 += dx12;
+				bc1 += dx20;
+				bc2 += dx01;
+				interp_U += du_dx;
+				interp_V += dv_dx;
+			}
+		}
+	} else {
+		for (y = minY; y <= maxY; y++, bc0_start += dy12, bc1_start += dy20, bc2_start += dy01) 
+		{
+			float bc0 = bc0_start;
+			float bc1 = bc1_start;
+			float bc2 = bc2_start;
+
+			int cb_row_start = y * cb_stride;
+
+			for (x = minX; x <= maxX; x++) 
+			{
+				if (bc0 < 0 || bc1 < 0 || bc2 < 0) goto next_pixel_notex;
+
+				if (gfx_alphaTest && A < 0x80) goto next_pixel_notex;
+				if (gfx_alphaBlend && A == 0)  goto next_pixel_notex;
+
+				int cb_index = cb_row_start + x;
+				int finR = R, finG = G, finB = B;
+
+				if (gfx_alphaBlend && A != 255) {
+					BitmapCol dst = colorBuffer[cb_index];
+					int dstR = BitmapCol_R(dst);
+					int dstG = BitmapCol_G(dst);
+					int dstB = BitmapCol_B(dst);
+
+					finR = (R * A + dstR * (255 - A)) >> 8;
+					finG = (G * A + dstG * (255 - A)) >> 8;
+					finB = (B * A + dstB * (255 - A)) >> 8;
+				}
+
+				colorBuffer[cb_index] = BitmapCol_Make(finR, finG, finB, 0xFF);
+
+			next_pixel_notex:
+				bc0 += dx12;
+				bc1 += dx20;
+				bc2 += dx01;
+			}
+		}
+	}
+}
+
+static void DrawTriangle3D(Vertex* V0, Vertex* V1, Vertex* V2) {
+	int x0 = (int)V0->x, y0 = (int)V0->y;
+	int x1 = (int)V1->x, y1 = (int)V1->y;
+	int x2 = (int)V2->x, y2 = (int)V2->y;
+
+	int area = edgeFunction(x0,y0, x1,y1, x2,y2);
+	if (area == 0) return;
+	if (faceCulling && area < 0) return;
+
+	float w0 = V0->w, w1 = V1->w, w2 = V2->w;
+	float z0 = V0->z, z1 = V1->z, z2 = V2->z;
+	PackedCol color = V0->c;
+
+	float u0 = V0->u * curTexWidth,  u1 = V1->u * curTexWidth,  u2 = V2->u * curTexWidth;
+	float v0 = V0->v * curTexHeight, v1 = V1->v * curTexHeight, v2 = V2->v * curTexHeight;
+
+	int R, G, B, A;
 	int a1, r1, g1, b1;
 	int a2, r2, g2, b2;
 	cc_bool texturing = gfx_format == VERTEX_FORMAT_TEXTURED;
@@ -618,63 +853,190 @@ static void DrawTriangle3D(Vertex* V0, Vertex* V1, Vertex* V2) {
 
 		float rawY = min(rawY0, rawY1);
 		int texY   = (int)(rawY + 0.01f) & texHeightMask;
-		MultiplyColors(color, curTexPixels[texY * curTexWidth]);
+		MultiplyColors(color, curTexPixels[texY << curTexWidthShift]);
 		texturing = false;
 	}
 
-	for (y = minY; y <= maxY; y++, bc0_start += dy12, bc1_start += dy20, bc2_start += dy01) 
-	{
-		float bc0 = bc0_start;
-		float bc1 = bc1_start;
-		float bc2 = bc2_start;
+	if (area < 0) {
+		int temp;
+		float tempF;
 
-		for (x = minX; x <= maxX; x++, bc0 += dx12, bc1 += dx20, bc2 += dx01) 
+		temp = x1; x1 = x2; x2 = temp;
+		temp = y1; y1 = y2; y2 = temp;
+
+		tempF = w1; w1 = w2; w2 = tempF;
+		tempF = z1; z1 = z2; z2 = tempF;
+		tempF = u1; u1 = u2; u2 = tempF;
+		tempF = v1; v1 = v2; v2 = tempF;
+
+		area = -area;
+	}
+
+	int minX = min(x0, min(x1, x2));
+	int minY = min(y0, min(y1, y2));
+	int maxX = max(x0, max(x1, x2));
+	int maxY = max(y0, max(y1, y2));
+
+	// Reject triangles completely outside
+	if (maxX < 0 || minX > fb_maxX) return;
+	if (maxY < 0 || minY > fb_maxY) return;
+
+	// Perform scissoring
+	minX = max(minX, 0); maxX = min(maxX, fb_maxX);
+	minY = max(minY, 0); maxY = min(maxY, fb_maxY);
+
+	// TODO proper clipping
+	if (w0 <= 0 || w1 <= 0 || w2 <= 0) {
+		return;
+	}
+
+	float factor = 1.0f / area;
+
+	// Pre-multiply attributes by factor
+	float w0_f = w0 * factor, w1_f = w1 * factor, w2_f = w2 * factor;
+	float z0_f = z0 * factor, z1_f = z1 * factor, z2_f = z2 * factor;
+	float u0_f = 0.0f, u1_f = 0.0f, u2_f = 0.0f;
+	float v0_f = 0.0f, v1_f = 0.0f, v2_f = 0.0f;
+
+	// https://fgiesen.wordpress.com/2013/02/10/optimizing-the-basic-rasterizer/
+	// Essentially these are the deltas of edge functions between X/Y and X/Y + 1 (i.e. one X/Y step)
+	int dx01  = y0 - y1, dy01 = x1 - x0;
+	int dx12  = y1 - y2, dy12 = x2 - x1;
+	int dx20  = y2 - y0, dy20 = x0 - x2;
+
+	float bc0_start = edgeFunction(x1,y1, x2,y2, minX+0.5f,minY+0.5f);
+	float bc1_start = edgeFunction(x2,y2, x0,y0, minX+0.5f,minY+0.5f);
+	float bc2_start = edgeFunction(x0,y0, x1,y1, minX+0.5f,minY+0.5f);
+
+	// Incremental deltas in X direction
+	float dw_dx = dx12 * w0_f + dx20 * w1_f + dx01 * w2_f;
+	float dz_dx = dx12 * z0_f + dx20 * z1_f + dx01 * z2_f;
+	float du_dx = 0.0f, dv_dx = 0.0f;
+
+	if (texturing) {
+		u0_f = u0 * factor; u1_f = u1 * factor; u2_f = u2 * factor;
+		v0_f = v0 * factor; v1_f = v1 * factor; v2_f = v2 * factor;
+		du_dx = dx12 * u0_f + dx20 * u1_f + dx01 * u2_f;
+		dv_dx = dx12 * v0_f + dx20 * v1_f + dx01 * v2_f;
+	}
+
+	int x, y;
+	if (texturing) {
+		for (y = minY; y <= maxY; y++, bc0_start += dy12, bc1_start += dy20, bc2_start += dy01) 
 		{
-			float ic0 = bc0 * factor;
-			float ic1 = bc1 * factor;
-			float ic2 = bc2 * factor;
-			if (ic0 < 0 || ic1 < 0 || ic2 < 0) continue;
-			int db_index = y * db_stride + x;
+			float bc0 = bc0_start;
+			float bc1 = bc1_start;
+			float bc2 = bc2_start;
 
-			float w = 1 / (ic0 * w0 + ic1 * w1 + ic2 * w2);
-			float z = (ic0 * z0 + ic1 * z1 + ic2 * z2) * w;
+			float interp_W = bc0 * w0_f + bc1 * w1_f + bc2 * w2_f;
+			float interp_Z = bc0 * z0_f + bc1 * z1_f + bc2 * z2_f;
+			float interp_U = bc0 * u0_f + bc1 * u1_f + bc2 * u2_f;
+			float interp_V = bc0 * v0_f + bc1 * v1_f + bc2 * v2_f;
 
-			if (depthTest && (z < 0 || z > depthBuffer[db_index])) continue;
-			if (!colWrite) {
+			int db_row_start = y * db_stride;
+			int cb_row_start = y * cb_stride;
+
+			for (x = minX; x <= maxX; x++) 
+			{
+				if (bc0 < 0.0f || bc1 < 0.0f || bc2 < 0.0f) goto next_pixel_tex;
+
+				int db_index = db_row_start + x;
+				if (depthTest && (interp_Z < 0.0f || interp_Z > depthBuffer[db_index] * interp_W)) goto next_pixel_tex;
+
+				float w = 1.0f / interp_W;
+				float z = interp_Z * w;
 				if (depthWrite) depthBuffer[db_index] = z;
-				continue;
-			}
 
-			if (texturing) {
-				float u = (ic0 * u0 + ic1 * u1 + ic2 * u2) * w;
-				float v = (ic0 * v0 + ic1 * v1 + ic2 * v2) * w;
+				if (!colWrite) goto next_pixel_tex;
+
+				float u = interp_U * w;
+				float v = interp_V * w;
 				int texX = ((int)u) & texWidthMask;
 				int texY = ((int)v) & texHeightMask;
 
-				int texIndex = texY * curTexWidth + texX;
+				int texIndex = (texY << curTexWidthShift) + texX;
 				BitmapCol tColor = curTexPixels[texIndex];
 
 				MultiplyColors(color, tColor);
+
+				if (gfx_alphaTest && A < 0x80) goto next_pixel_tex;
+				int cb_index = cb_row_start + x;
+				
+				if (!gfx_alphaBlend) {
+					colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
+					goto next_pixel_tex;
+				}
+
+				BitmapCol dst = colorBuffer[cb_index];
+				int dstR = BitmapCol_R(dst);
+				int dstG = BitmapCol_G(dst);
+				int dstB = BitmapCol_B(dst);
+
+				int finR = (R * A + dstR * (255 - A)) >> 8;
+				int finG = (G * A + dstG * (255 - A)) >> 8;
+				int finB = (B * A + dstB * (255 - A)) >> 8;
+				colorBuffer[cb_index] = BitmapCol_Make(finR, finG, finB, 0xFF);
+
+			next_pixel_tex:
+				bc0 += dx12;
+				bc1 += dx20;
+				bc2 += dx01;
+				interp_W += dw_dx;
+				interp_Z += dz_dx;
+				interp_U += du_dx;
+				interp_V += dv_dx;
 			}
+		}
+	} else {
+		for (y = minY; y <= maxY; y++, bc0_start += dy12, bc1_start += dy20, bc2_start += dy01) 
+		{
+			float bc0 = bc0_start;
+			float bc1 = bc1_start;
+			float bc2 = bc2_start;
 
-			if (gfx_alphaTest && A < 0x80) continue;
-			if (depthWrite) depthBuffer[db_index] = z;
-			int cb_index = y * cb_stride + x;
-			
-			if (!gfx_alphaBlend) {
-				colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
-				continue;
+			float interp_W = bc0 * w0_f + bc1 * w1_f + bc2 * w2_f;
+			float interp_Z = bc0 * z0_f + bc1 * z1_f + bc2 * z2_f;
+
+			int db_row_start = y * db_stride;
+			int cb_row_start = y * cb_stride;
+
+			for (x = minX; x <= maxX; x++) 
+			{
+				if (bc0 < 0.0f || bc1 < 0.0f || bc2 < 0.0f) goto next_pixel_notex;
+
+				int db_index = db_row_start + x;
+				if (depthTest && (interp_Z < 0.0f || interp_Z > depthBuffer[db_index] * interp_W)) goto next_pixel_notex;
+
+				float w = 1.0f / interp_W;
+				float z = interp_Z * w;
+				if (depthWrite) depthBuffer[db_index] = z;
+
+				if (!colWrite) goto next_pixel_notex;
+				if (gfx_alphaTest && A < 0x80) goto next_pixel_notex;
+				int cb_index = cb_row_start + x;
+				
+				if (!gfx_alphaBlend) {
+					colorBuffer[cb_index] = BitmapCol_Make(R, G, B, 0xFF);
+					goto next_pixel_notex;
+				}
+
+				BitmapCol dst = colorBuffer[cb_index];
+				int dstR = BitmapCol_R(dst);
+				int dstG = BitmapCol_G(dst);
+				int dstB = BitmapCol_B(dst);
+
+				int finR = (R * A + dstR * (255 - A)) >> 8;
+				int finG = (G * A + dstG * (255 - A)) >> 8;
+				int finB = (B * A + dstB * (255 - A)) >> 8;
+				colorBuffer[cb_index] = BitmapCol_Make(finR, finG, finB, 0xFF);
+
+			next_pixel_notex:
+				bc0 += dx12;
+				bc1 += dx20;
+				bc2 += dx01;
+				interp_W += dw_dx;
+				interp_Z += dz_dx;
 			}
-
-			BitmapCol dst = colorBuffer[cb_index];
-			int dstR = BitmapCol_R(dst);
-			int dstG = BitmapCol_G(dst);
-			int dstB = BitmapCol_B(dst);
-
-			int finR = (R * A + dstR * (255 - A)) >> 8;
-			int finG = (G * A + dstG * (255 - A)) >> 8;
-			int finB = (B * A + dstB * (255 - A)) >> 8;
-			colorBuffer[cb_index] = BitmapCol_Make(finR, finG, finB, 0xFF);
 		}
 	}
 }

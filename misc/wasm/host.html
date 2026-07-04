@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ClassiCube</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+  canvas { width: 100vw; height: 100vh; display: block; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Minimal reference host for the generic wasm build (see src/wasm/).
+// The module imports nothing at all - it only needs to be instantiated
+// and have its exported functions called / memory read.
+const KEY_MAP = {
+	KeyA:65, KeyB:66, KeyC:67, KeyD:68, KeyE:69, KeyF:70, KeyG:71,
+	KeyH:72, KeyI:73, KeyJ:74, KeyK:75, KeyL:76, KeyM:77, KeyN:78,
+	KeyO:79, KeyP:80, KeyQ:81, KeyR:82, KeyS:83, KeyT:84, KeyU:85,
+	KeyV:86, KeyW:87, KeyX:88, KeyY:89, KeyZ:90,
+	Digit0:48, Digit1:49, Digit2:50, Digit3:51, Digit4:52,
+	Digit5:53, Digit6:54, Digit7:55, Digit8:56, Digit9:57,
+	Space:93, Enter:91, Escape:92, Backspace:94, Tab:95,
+	ShiftLeft:36, ShiftRight:37, ControlLeft:38, ControlRight:39,
+	AltLeft:40, AltRight:41, ArrowUp:44, ArrowDown:45, ArrowLeft:46, ArrowRight:47,
+	Backquote:25,
+};
+const MOUSE_MAP = { 0:119, 2:120, 1:121 }; // left, right, middle -> CCMOUSE_L/R/M
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+fetch('ClassiCube.wasm')
+	.then(r => r.arrayBuffer())
+	.then(bytes => WebAssembly.instantiate(bytes, {}))
+	.then(({ instance }) => {
+		const w = instance.exports;
+
+		w._initialize();
+		const fbWidth = Math.min(window.innerWidth, 854) | 0;
+		const fbHeight = Math.min(window.innerHeight, 480) | 0;
+		w.wasm_init(fbWidth, fbHeight);
+
+		canvas.width = fbWidth;
+		canvas.height = fbHeight;
+		const imgData = ctx.createImageData(fbWidth, fbHeight);
+
+		let mx = fbWidth / 2, my = fbHeight / 2;
+		canvas.addEventListener('click', () => canvas.requestPointerLock());
+		document.addEventListener('mousemove', e => {
+			if (document.pointerLockElement === canvas) {
+				// Locked: camera look needs raw deltas, not an absolute position
+				mx = Math.max(0, Math.min(fbWidth - 1, mx + e.movementX));
+				my = Math.max(0, Math.min(fbHeight - 1, my + e.movementY));
+				w.wasm_mouse_move(mx, my);
+				w.wasm_mouse_delta(e.movementX, e.movementY);
+			} else {
+				// Unlocked: just track the real cursor position (menus, etc)
+				const rect = canvas.getBoundingClientRect();
+				mx = (e.clientX - rect.left) * (fbWidth / rect.width);
+				my = (e.clientY - rect.top) * (fbHeight / rect.height);
+				w.wasm_mouse_move(mx | 0, my | 0);
+			}
+		});
+		document.addEventListener('mousedown', e => {
+			if (e.button in MOUSE_MAP) w.wasm_mouse_button(MOUSE_MAP[e.button], 1);
+		});
+		document.addEventListener('mouseup', e => {
+			if (e.button in MOUSE_MAP) w.wasm_mouse_button(MOUSE_MAP[e.button], 0);
+		});
+		document.addEventListener('wheel', e => w.wasm_mouse_wheel(e.deltaY < 0 ? 1 : -1));
+		document.addEventListener('keydown', e => {
+			if (e.code in KEY_MAP) { e.preventDefault(); w.wasm_key_event(KEY_MAP[e.code], 1); }
+		});
+		document.addEventListener('keyup', e => {
+			if (e.code in KEY_MAP) { e.preventDefault(); w.wasm_key_event(KEY_MAP[e.code], 0); }
+		});
+		canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+		let lastTime = performance.now();
+		function frame(now) {
+			const deltaMs = now - lastTime;
+			lastTime = now;
+
+			if (!w.wasm_tick(deltaMs)) return; // game closed itself
+
+			const ptr = w.wasm_get_framebuffer();
+			imgData.data.set(new Uint8Array(w.memory.buffer, ptr, fbWidth * fbHeight * 4));
+			ctx.putImageData(imgData, 0, 0);
+			requestAnimationFrame(frame);
+		}
+		requestAnimationFrame(frame);
+	});
+</script>
+</body>
+</html>

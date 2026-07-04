@@ -584,13 +584,13 @@ static cc_result ExtractFrom(struct Stream* stream, const cc_string* path) {
 	return res;
 }
 
-#if defined CC_BUILD_PS1 || defined CC_BUILD_SATURN
+#if defined CC_BUILD_PS1 || defined CC_BUILD_SATURN || defined CC_BUILD_WASM
 /* Load hardcoded texture pack */
 #include "../misc/ps1/classicubezip.h"
 
 static cc_result ExtractFromFile(const cc_string* path) {
 	struct Stream stream;
-	Stream_ReadonlyMemory(&stream, ccTextures, ccTextures_length);
+	Stream_ReadonlyMemory(&stream, (void*)ccTextures, ccTextures_length);
 
 	return ExtractFrom(&stream, path);
 }

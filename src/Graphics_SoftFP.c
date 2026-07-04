@@ -947,8 +947,7 @@ static void DrawTriangle3D(VertexFixed* V0, VertexFixed* V1, VertexFixed* V2) {
             }
 
             if (gfx_alphaTest && Aloc < 0x80) {
-                // update and continue
-                if (depthWrite) ; // nothing
+                // update and continue (rejected by alpha test)
             } else {
                 if (depthWrite) depthBuffer[db_index] = z;
                 int cb_index = y * cb_stride + x;
